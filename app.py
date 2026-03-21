@@ -5,25 +5,47 @@ import re
 import calendar
 import numpy as np
 import plotly.graph_objects as go
+import os
 
-st.set_page_config(page_title="Dự án Window Thủy Triều V2.3 (Có Biểu Đồ)", layout="wide")
-st.title("🌊 Ứng Dụng Phân Tích & Trực Quan Hóa Thủy Triều (Bản Final V2.3)")
+st.set_page_config(page_title="Dự án Window Thủy Triều V2.4", layout="wide")
+st.title("🌊 Ứng Dụng Phân Tích & Trực Quan Hóa Thủy Triều (Bản V2.4 Auto-Load)")
 
 tz_vn = timezone(timedelta(hours=7))
 now_vn = datetime.now(tz_vn)
 
 st.info(f"🕒 Thời gian hiện tại: **{now_vn.strftime('%H:%M:%S - %d/%m/%Y')}** (Múi giờ +7)")
 
-uploaded_file = st.file_uploader("Vui lòng tải lên file Excel của bạn", type=['xlsx', 'xls', 'csv'])
+# ==========================================
+# CƠ CHẾ AUTO-LOAD FILE MẶC ĐỊNH
+# ==========================================
+DEFAULT_FILE = "HLWVT 2026.xlsx" # Tên file gốc để sẵn trong hệ thống
 
+uploaded_file = st.file_uploader(f"Tải file Excel khác lên (Bỏ qua bước này nếu đã có sẵn file {DEFAULT_FILE})", type=['xlsx', 'xls', 'csv'])
+
+file_source = None
 if uploaded_file is not None:
+    file_source = uploaded_file
+elif os.path.exists(DEFAULT_FILE):
+    file_source = DEFAULT_FILE
+    st.success(f"✅ Đã tự động đọc dữ liệu từ hệ thống: **{DEFAULT_FILE}** (Không cần Upload lại!)")
+else:
+    st.warning(f"⚠️ Mẹo: Hãy copy file '{DEFAULT_FILE}' để vào cùng thư mục với file app.py để ứng dụng tự động tải dữ liệu mỗi lần mở web!")
+
+if file_source is not None:
     try:
-        if uploaded_file.name.endswith('.csv'):
+        # Kiểm tra định dạng file là CSV hay Excel
+        is_csv = False
+        if isinstance(file_source, str):
+            is_csv = file_source.lower().endswith('.csv')
+        else:
+            is_csv = file_source.name.lower().endswith('.csv')
+
+        if is_csv:
             xl_sheet_names = ['HLW-VT']
-            df = pd.read_csv(uploaded_file)
+            df = pd.read_csv(file_source)
             has_cl_data = False
         else:
-            xl = pd.ExcelFile(uploaded_file)
+            xl = pd.ExcelFile(file_source)
             has_cl_data = False
             if 'CL' in xl.sheet_names:
                 df_cl = xl.parse('CL')
@@ -98,7 +120,7 @@ if uploaded_file is not None:
 
             df_clean = df[(df[col_level] <= 5.0) & (df[col_level] >= -0.5)].copy().reset_index(drop=True)
             df_clean['Next_Amplitude'] = abs(df_clean[col_level].shift(-1) - df_clean[col_level])
-            df_clean['Level_num'] = df_clean[col_level] # Giữ lại cột số để vẽ biểu đồ
+            df_clean['Level_num'] = df_clean[col_level] 
             
             prev_level = df_clean[col_level].shift(1)
             next_level = df_clean[col_level].shift(-1)
@@ -123,7 +145,7 @@ if uploaded_file is not None:
                 if pd.isna(next_amp): next_amp = amp
                 min_amp = min(amp, next_amp) if pd.notna(amp) else 0
                 
-                # BƯỚC 1: NƯỚC ĐỨNG
+                # LỌC NƯỚC ĐỨNG
                 if min_amp <= 0.4:
                     slack_times.append("Nước đứng")
                     arrows.append("-")
@@ -133,7 +155,7 @@ if uploaded_file is not None:
                     final_slacks_dt.append(pd.NaT)
                     continue
                 
-                # BƯỚC 2: CÔNG THỨC CL V2.2
+                # CÔNG THỨC CL V2.2
                 if hw_lw == 'HW':
                     arr = '↙'
                     if level >= 4.0: delta = pd.Timedelta(hours=3, minutes=55)
@@ -155,7 +177,7 @@ if uploaded_file is not None:
                 slack_times.append(cl_str)
                 arrows.append(arr)
                 
-                # TẠO SLACK FINAL - LOGIC THỰC CHIẾN
+                # TẠO SLACK FINAL (TỐI ƯU 35%)
                 if has_cl_data:
                     time_diffs = (df_cl['F28_Datetime'] - new_dt).abs()
                     min_idx = time_diffs.idxmin()
@@ -180,7 +202,6 @@ if uploaded_file is not None:
                             half_diff = diff_mins_abs // 2
                             final_dt = earlier_dt + pd.Timedelta(minutes=half_diff)
                         else:
-                            # Áp dụng tỷ lệ 35% cho các ca lệch > 35p
                             thirty_five_percent = int(diff_mins_abs * 0.35)
                             final_dt = earlier_dt + pd.Timedelta(minutes=thirty_five_percent)
                             
@@ -228,7 +249,6 @@ if uploaded_file is not None:
                 start_date = pd.Timestamp(year=selected_year, month=selected_month, day=1)
                 end_date = pd.Timestamp(year=selected_year, month=selected_month, day=last_day_of_month)
 
-            # Lọc dữ liệu theo mốc thời gian hiển thị
             mask = (df_clean['Date_Filter'] >= start_date) & (df_clean['Date_Filter'] <= end_date)
             filtered_df = df_clean.loc[mask].copy().reset_index(drop=True)
             
@@ -276,7 +296,7 @@ if uploaded_file is not None:
                                           .map(color_diff, subset=['Sai khác (phút)'])\
                                           .map(color_final, subset=['SLACK FINAL (CHỐT)'])
                 
-                st.info("💡 **Giải thích Cột SLACK FINAL:** Lệch ≤ 10p (Lấy sớm hơn); Lệch 11-15p (+5p vào bên sớm); Lệch 16-35p (+50% phần lệch vào bên sớm); Lệch > 35p (+35% phần lệch vào bên sớm). **Làm tròn lùi về 5 phút.**")
+                st.info("💡 **Giải thích Cột SLACK FINAL:** Lệch ≤ 10p (Lấy sớm hơn); Lệch 11-15p (+5p vào bên sớm); Lệch 16-35p (+50% lệch vào bên sớm); Lệch > 35p (+35% lệch vào bên sớm). **Tất cả làm tròn lùi về 5 phút.**")
                 
                 if view_mode == "Chế độ 7 Ngày":
                     st.dataframe(styled_df, use_container_width=True, hide_index=True)
@@ -321,18 +341,18 @@ if uploaded_file is not None:
                         mode='markers',
                         name='Giờ Đổi Dòng (Slack Final)',
                         marker=dict(size=14, color='#c0392b', symbol='x', line=dict(width=2, color='#c0392b')),
-                        hovertemplate="<b>🕒 Đổi dòng lúc: %{x|%H:%M (Ngày %d/%m)}</b><br>Mức nước lúc đổi dòng: ~%{y:.1f}m<extra></extra>"
+                        hovertemplate="<b>🕒 Đổi dòng lúc: %{x|%H:%M (Ngày %d/%m)}</b><br>Mức nước ước tính: ~%{y:.1f}m<extra></extra>"
                     ))
 
                 # Kẻ vạch đỏ cảnh báo Triều Cường (HW >= 4.0m)
                 fig.add_hline(y=4.0, line_dash="dash", line_color="#e74c3c", 
-                              annotation_text=" Vạch Cảnh Báo Triều Cường Cực Đại (≥ 4.0m)", 
+                              annotation_text=" Vạch Cảnh Báo Triều Cường (≥ 4.0m)", 
                               annotation_position="top left",
                               annotation_font_color="#e74c3c")
 
                 # Tối ưu giao diện đồ thị
                 fig.update_layout(
-                    xaxis_title="Thời gian (Ngày & Giờ)",
+                    xaxis_title="Thời gian",
                     yaxis_title="Mức nước (m)",
                     hovermode="x unified",
                     template="plotly_white",
@@ -341,7 +361,6 @@ if uploaded_file is not None:
                     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                 )
 
-                # Hiển thị biểu đồ ra màn hình
                 st.plotly_chart(fig, use_container_width=True)
                     
     except Exception as e:
