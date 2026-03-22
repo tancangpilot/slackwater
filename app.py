@@ -6,7 +6,7 @@ import numpy as np
 import os
 
 st.set_page_config(page_title="Dự án Window Thủy Triều V2.7 No Chart", layout="wide")
-st.title("🌊 Ứng Dụng Phân Tích Thủy Triều (Bản V2.7 - Tối ưu Thực chiến)")
+st.title("🌊 Ứng Dụng Phân Tích Thủy Triều (Bản V2.7)")
 
 tz_vn = timezone(timedelta(hours=7))
 now_vn = datetime.now(tz_vn)
