@@ -5,8 +5,8 @@ import calendar
 import numpy as np
 import os
 
-st.set_page_config(page_title="Dự án Window Thủy Triều V2.7 No Chart", layout="wide")
-st.title("🌊 Ứng Dụng Phân Tích Thủy Triều (Bản V2.7)")
+st.set_page_config(page_title="Dự án Window Thủy Triều V2.9", layout="wide")
+st.title("🌊 Phân Tích Thủy Triều (Bản V2.9)")
 
 tz_vn = timezone(timedelta(hours=7))
 now_vn = datetime.now(tz_vn)
@@ -14,7 +14,7 @@ now_vn = datetime.now(tz_vn)
 st.info(f"🕒 Thời gian hiện tại: **{now_vn.strftime('%H:%M:%S - %d/%m/%Y')}** (Múi giờ +7)")
 
 # ==========================================
-# CƠ CHẾ AUTO-LOAD FILE (V2.4)
+# CƠ CHẾ AUTO-LOAD FILE
 # ==========================================
 DEFAULT_FILE = "HLWVT 2026.xlsx"
 
@@ -50,6 +50,7 @@ if file_source:
             df = xl.parse('HLW-VT')
 
         df.columns = df.columns.str.strip()
+        col_time_orig = 'HL Water'
         col_level = 'Level(m)'
         df[col_level] = pd.to_numeric(df[col_level], errors='coerce')
         df['Parsed_Date'] = pd.to_datetime(df['Date'], errors='coerce').bfill(limit=1).ffill()
@@ -57,7 +58,7 @@ if file_source:
         base_dts = []
         for _, row in df.iterrows():
             try:
-                t = str(row['HL Water']).strip()
+                t = str(row[col_time_orig]).strip()
                 h, m = map(int, t.split(':')[:2])
                 base_dts.append(row['Parsed_Date'] + pd.Timedelta(hours=h, minutes=m))
             except: base_dts.append(pd.NaT)
@@ -93,7 +94,7 @@ if file_source:
                     else: delta = 235 # 3h55
                 
                 cl_dt = base_dt + pd.Timedelta(minutes=delta)
-                cl_dt = cl_dt.replace(minute=(cl_dt.minute // 5) * 5)
+                # KHÔNG LÀM TRÒN CHO SLACK CL (Giữ độ chính xác từng phút)
                 cl_s = cl_dt.strftime('%H:%M') + (' (+1)' if cl_dt.date() > base_dt.date() else '')
                 
                 final_dt = cl_dt
@@ -106,20 +107,23 @@ if file_source:
                         d_mins = int((cl_dt - best_f28).total_seconds() / 60)
                         diff_s = f"+{d_mins}" if d_mins > 0 else str(d_mins)
                         
-                        # LOGIC FINAL CHỐT (35%)
+                        # LOGIC FINAL CHỐT
                         early, d_abs = (cl_dt if d_mins < 0 else best_f28), abs(d_mins)
-                        if d_abs <= 10: final_dt = early
-                        elif d_abs <= 15: final_dt = early + pd.Timedelta(minutes=5)
-                        elif d_abs <= 35: final_dt = early + pd.Timedelta(minutes=d_abs//2)
-                        else: final_dt = early + pd.Timedelta(minutes=int(d_abs * 0.35))
                         
+                        if d_abs <= 15:
+                            final_dt = early
+                        else:
+                            final_dt = early + pd.Timedelta(minutes=int(d_abs * 0.35))
+                        
+                        # BẬT LẠI LÀM TRÒN LÙI 5 PHÚT CHO SLACKCL FINAL (Ưu tiên đi ca an toàn)
                         final_dt = final_dt.replace(minute=(final_dt.minute // 5) * 5)
                 
                 final_s = final_dt.strftime('%H:%M') + (' (+1)' if final_dt.date() > base_dt.date() else '')
 
             res.append([cl_s, f28_s, diff_s, final_s, arr])
 
-        res_df = pd.DataFrame(res, columns=['Slack CL', 'Slack F28', 'Diff', 'SLACK FINAL', 'Dòng'])
+        # Đổi tên cột chuẩn hóa
+        res_df = pd.DataFrame(res, columns=['Slack CL', 'Slack F28', 'Diff', 'SlackCL Final', 'Dir'])
         df_final = pd.concat([df_clean, res_df], axis=1)
 
         # GIAO DIỆN HIỂN THỊ
@@ -136,22 +140,28 @@ if file_source:
             end = start + pd.offsets.MonthEnd()
         
         f_df = df_final[(df_final['Parsed_Date'] >= start) & (df_final['Parsed_Date'] <= end)].copy()
-        f_df['Ngày'] = f_df['Parsed_Date'].dt.strftime('%d/%m/%Y')
-        f_df.loc[f_df['Ngày'] == f_df['Ngày'].shift(), 'Ngày'] = ""
         
-        # --- ĐỊNH DẠNG SỐ THẬP PHÂN CHO LEVEL(M) ---
-        f_df[col_level] = f_df[col_level].map('{:.1f}'.format)
+        # CHUẨN BỊ DATAFRAME VỚI TÊN CỘT MỚI
+        disp_df = f_df[['Parsed_Date', 'Ký hiệu', col_time_orig, col_level, 'Slack CL', 'Slack F28', 'Diff', 'SlackCL Final', 'Dir']].copy()
+        disp_df.rename(columns={
+            'Parsed_Date': 'Date',
+            'Ký hiệu': 'HL Water',
+            col_time_orig: 'Time'
+        }, inplace=True)
         
-        st.info("💡 **Giải thích:** Cột SLACK FINAL được chốt dựa trên quy tắc an toàn thực chiến (Ưu tiên giờ sớm & làm tròn lùi 5p). Nếu biên độ ≤ 0.4m, hệ thống ghi '-' (nước đi ngang).")
-
+        disp_df['Date'] = disp_df['Date'].dt.strftime('%d/%m/%Y')
+        disp_df.loc[disp_df['Date'] == disp_df['Date'].shift(), 'Date'] = ""
+        
+        disp_df[col_level] = disp_df[col_level].map('{:.1f}'.format)      
+       
         # Định dạng bảng
         def style_final_table(styler):
-            styler.map(lambda x: 'color: #007bff; font-weight: bold;' if x == 'HW' else ('color: #dc3545; font-weight: bold;' if x == 'LW' else ''), subset=['Ký hiệu'])
-            styler.map(lambda x: 'background-color: #e8f8f5; font-weight: bold; color: #1c2833; font-size: 15px;' if x != "-" else '', subset=['SLACK FINAL'])
-            styler.map(lambda x: 'font-weight: bold; color: #007bff;' if x == '↙' else ('font-weight: bold; color: #dc3545;' if x == '↗' else ''), subset=['Dòng'])
+            styler.map(lambda x: 'color: #007bff; font-weight: bold;' if x == 'HW' else ('color: #dc3545; font-weight: bold;' if x == 'LW' else ''), subset=['HL Water'])
+            styler.map(lambda x: 'background-color: #e8f8f5; font-weight: bold; color: #1c2833; font-size: 15px;' if x != "-" else '', subset=['SlackCL Final'])
+            styler.map(lambda x: 'font-weight: bold; color: #007bff;' if x == '↙' else ('font-weight: bold; color: #dc3545;' if x == '↗' else ''), subset=['Dir'])
             return styler
 
-        st.dataframe(style_final_table(f_df[['Ngày', 'Ký hiệu', 'HL Water', col_level, 'Slack CL', 'Slack F28', 'Diff', 'SLACK FINAL', 'Dòng']].style), use_container_width=True, hide_index=True, height=550)
+        st.dataframe(style_final_table(disp_df.style), use_container_width=True, hide_index=True, height=550)
 
     except Exception as e:
         st.error(f"❌ Lỗi hệ thống: {e}")
