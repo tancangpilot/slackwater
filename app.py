@@ -4,21 +4,46 @@ from datetime import datetime, timedelta, timezone
 import calendar
 import numpy as np
 import os
+import base64
 
-st.set_page_config(page_title="Dự án Window Thủy Triều V2.11.2", layout="wide")
-st.title("🌊 Phân Tích Thủy Triều (Bản V2.11.2)")
+def get_base64_image(image_path):
+    with open(image_path, "rb") as img_file:
+        return base64.b64encode(img_file.read()).decode()
+
+# Mã hóa file cờ của bạn
+try:
+    bin_str = get_base64_image("flagvietnam.png")
+    flag_html = f'<img src="data:image/png;base64,{bin_str}" width="25" style="vertical-align: middle; margin-right: 8px;">'
+except:
+    flag_html = "🇻🇳 " # Dự phòng nếu không tìm thấy file ảnh
+
+st.set_page_config(page_title="Dự án Window Thủy Triều V2.13", layout="wide")
+st.title("🌊 Phân Tích Thủy Triều (Bản V2.13)")
 
 tz_vn = timezone(timedelta(hours=7))
 now_vn = datetime.now(tz_vn)
 
-st.info(f"🕒 Thời gian hiện tại: **{now_vn.strftime('%H:%M:%S - %d/%m/%Y')}** (Múi giờ +7)")
-
 # ==========================================
-# CƠ CHẾ AUTO-LOAD FILE
+# GIAO DIỆN HEADER (Cùng hàng, tinh gọn)
 # ==========================================
 DEFAULT_FILE = "HLWVT 2026.xlsx"
 
-uploaded_file = st.file_uploader(f"Tải file Excel mới (Hoặc để hệ thống tự đọc {DEFAULT_FILE})", type=['xlsx', 'xls', 'csv'])
+col_time, col_upload = st.columns([1.5, 2.5])
+with col_time:
+    # Căn chỉnh một chút để đồng hồ nằm cân đối với nút uploader bên cạnh
+    st.markdown(
+        f"""
+        <div style='margin-top: 10px; font-size: 16px; padding: 10px; background-color: #e8f4f8; 
+        border-radius: 5px; color: #0c5460; border: 1px solid #bee5eb; display: flex; align-items: center;'>
+            {flag_html} <b>{now_vn.strftime('%H:%M:%S - %d/%m/%Y')}</b> &nbsp;(+7)
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
+    
+with col_upload:
+    # Ẩn hoàn toàn chữ "Upload Data" đi
+    uploaded_file = st.file_uploader("Upload", type=['xlsx', 'xls', 'csv'], label_visibility="collapsed")
 
 file_source = uploaded_file if uploaded_file else (DEFAULT_FILE if os.path.exists(DEFAULT_FILE) else None)
 
@@ -98,18 +123,18 @@ if file_source:
 
             if amp_val > 0.4:
                 # ==============================
-                # THIẾT LẬP HỆ SỐ & MŨI TÊN (Đã chuyển về 1 mũi tên)
+                # THIẾT LẬP HỆ SỐ (TỶ LỆ KIM CƯƠNG)
                 # ==============================
                 if hw_lw == 'HW':
                     arr_cl, arr_cm = '↙', '↙'
-                    delta_cm = 65 # HW + 65 phút
+                    delta_cm = 70  # CHỐT: HW + 70 phút
                     if level >= 4.0: delta_cl = 235 
                     elif level >= 3.0: delta_cl = 205 
                     elif level >= 2.0: delta_cl = 195 
                     else: delta_cl = 185 
                 else:
                     arr_cl, arr_cm = '↗', '↗'
-                    delta_cm = 50 # LW + 50 phút
+                    delta_cm = 50  # CHỐT: LW + 50 phút
                     if level >= 1.5: delta_cl = 220 
                     elif level >= 1.0: delta_cl = 225 
                     elif level >= 0.5: delta_cl = 230 
@@ -163,26 +188,34 @@ if file_source:
 
             res.append([cl_s, f28_s, diff_s, final_s, arr_cl, cm_s, f28cm_s, diff_cm_s, final_cm_s, arr_cm])
 
-        # Đổi tên cột chuẩn hóa
         res_df = pd.DataFrame(res, columns=['Slack CL', 'Slack F28CL', 'DiffCLF28', 'SlackCL Final', 'DirCL', 'SlackCM', 'SlackF28CM', 'DiffCMF28', 'SlackCM Final', 'DirCM'])
         df_final = pd.concat([df_clean, res_df], axis=1)
 
-        # GIAO DIỆN HIỂN THỊ
-        view = st.radio("🔄 Chế độ hiển thị:", ("Chế độ 7 Ngày", "Chế độ xem theo Tháng"), horizontal=True)
-        if view == "Chế độ 7 Ngày":
+        # ==========================================
+        # GIAO DIỆN ĐIỀU KHIỂN & HIỂN THỊ
+        # ==========================================
+        st.markdown("---")
+        
+        # Đưa Label và Radio Button lên cùng 1 hàng bằng chia cột
+        col_label, col_radio = st.columns([1.2, 8.8])
+        with col_label:
+            st.markdown("<p style='margin-top: 10px; font-weight: bold; font-size: 16px;'>🔄 Chế độ hiển thị:</p>", unsafe_allow_html=True)
+        with col_radio:
+            view = st.radio("Chế độ hiển thị", ("Week", "Month"), horizontal=True, label_visibility="collapsed")
+        
+        if view == "Week":
             sel_d = st.date_input("🗓️ Chọn ngày mốc:", now_vn.date())
             start = pd.Timestamp(sel_d) - pd.Timedelta(days=1)
             end = start + pd.Timedelta(days=6)
         else:
-            col1, col2 = st.columns(2)
-            with col1: s_month = st.selectbox("📅 Tháng:", list(range(1, 13)), index=now_vn.month-1)
-            with col2: s_year = st.selectbox("📅 Năm:", [2025, 2026, 2027], index=1)
+            col_m1, col_m2 = st.columns(2)
+            with col_m1: s_month = st.selectbox("📅 Tháng:", list(range(1, 13)), index=now_vn.month-1)
+            with col_m2: s_year = st.selectbox("📅 Năm:", [2025, 2026, 2027], index=1)
             start = pd.Timestamp(year=s_year, month=s_month, day=1)
             end = start + pd.offsets.MonthEnd()
         
         f_df = df_final[(df_final['Parsed_Date'] >= start) & (df_final['Parsed_Date'] <= end)].copy()
         
-        # CHUẨN BỊ DATAFRAME VỚI TÊN CỘT MỚI
         disp_df = f_df[['Parsed_Date', 'Ký hiệu', col_time_orig, col_level, 'Slack CL', 'Slack F28CL', 'DiffCLF28', 'SlackCL Final', 'DirCL', 'SlackCM', 'SlackF28CM', 'DiffCMF28', 'SlackCM Final', 'DirCM']].copy()
         disp_df.rename(columns={
             'Parsed_Date': 'Date',
@@ -194,38 +227,31 @@ if file_source:
         disp_df.loc[disp_df['Date'] == disp_df['Date'].shift(), 'Date'] = ""
         disp_df[col_level] = disp_df[col_level].map('{:.1f}'.format)
         
-        # TÍNH NĂNG ẨN / HIỆN CỘT DỮ LIỆU
-        st.markdown("---")
         all_cols = disp_df.columns.tolist()
-        selected_cols = st.multiselect("⚙️ Tùy chỉnh hiển thị cột:", all_cols, default=all_cols)
-        
-        # Lọc DataFrame theo cột đã chọn
-        disp_df = disp_df[selected_cols]      
+        selected_cols = st.multiselect("⚙️ Ẩn/Hiện cột tùy ý:", all_cols, default=all_cols)
+        disp_df = disp_df[selected_cols]
 
-        # Định dạng bảng thông minh
+        # ==========================================
+        # ĐỊNH DẠNG BẢNG
+        # ==========================================
         def style_final_table(styler):
-            # 1. Đổ nền vàng nhạt cho dòng khởi đầu ngày mới (khi cột Date có chữ)
+            # Tô nền dòng bắt đầu ngày mới
             def highlight_new_day(row):
                 if 'Date' in row.index and row['Date'] != "":
-                    # Màu vàng nhạt nhẹ nhàng, không chói mắt
                     return ['background-color: #fff8e1; border-top: 1.5px solid #f1c40f;'] * len(row)
                 return [''] * len(row)
             
             styler.apply(highlight_new_day, axis=1)
 
-            # 2. Định dạng chữ HW/LW
             if 'HLW Vung Tau' in selected_cols:
                 styler.map(lambda x: 'color: #007bff; font-weight: bold;' if x == 'HW' else ('color: #dc3545; font-weight: bold;' if x == 'LW' else ''), subset=['HLW Vung Tau'])
             
-            # 3. Định dạng Cột Final (Tô nền xanh mint - đè lên nền vàng)
             final_cols = [col for col in ['SlackCL Final', 'SlackCM Final'] if col in selected_cols]
             if final_cols:
                 styler.map(lambda x: 'background-color: #e8f8f5; font-weight: bold; color: #1c2833; font-size: 15px;' if x != "-" else '', subset=final_cols)
             
-            # 4. Định dạng Mũi tên đơn cỡ lớn (DirCL, DirCM)
             dir_cols = [col for col in ['DirCL', 'DirCM'] if col in selected_cols]
             if dir_cols:
-                # Tăng font-size lên 22px để mũi tên dài và to hơn, đồng thời bỏ letter-spacing
                 styler.map(lambda x: 'font-weight: bold; color: #007bff; font-size: 22px;' if '↙' in str(x) else ('font-weight: bold; color: #dc3545; font-size: 22px;' if '↗' in str(x) else ''), subset=dir_cols)
             
             return styler
