@@ -17,8 +17,8 @@ try:
 except:
     flag_html = "🇻🇳 " # Dự phòng nếu không tìm thấy file ảnh
 
-st.set_page_config(page_title="Dự án Window Thủy Triều V2.13", layout="wide")
-st.title("🌊 Phân Tích Thủy Triều (Bản V2.13)")
+st.set_page_config(page_title="Dự án Window Thủy Triều V2.15", layout="wide")
+st.title("🌊 Phân Tích Thủy Triều (Bản V2.15 - Tỷ Lệ Vàng 65/50)")
 
 tz_vn = timezone(timedelta(hours=7))
 now_vn = datetime.now(tz_vn)
@@ -123,11 +123,11 @@ if file_source:
 
             if amp_val > 0.4:
                 # ==============================
-                # THIẾT LẬP HỆ SỐ (TỶ LỆ KIM CƯƠNG)
+                # THIẾT LẬP HỆ SỐ (TỶ LỆ VÀNG 65/50)
                 # ==============================
                 if hw_lw == 'HW':
                     arr_cl, arr_cm = '↙', '↙'
-                    delta_cm = 70  # CHỐT: HW + 70 phút
+                    delta_cm = 65  # CHỐT: HW + 65 phút
                     if level >= 4.0: delta_cl = 235 
                     elif level >= 3.0: delta_cl = 205 
                     elif level >= 2.0: delta_cl = 195 
