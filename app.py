@@ -16,8 +16,8 @@ try:
 except:
     flag_html = "🇻🇳 " 
 
-st.set_page_config(page_title="Dự án Window Thủy Triều V2.18", layout="wide")
-st.title("🌊 Phân Tích Thủy Triều (Bản V2.18 - Ma Trận An Toàn)")
+st.set_page_config(page_title="Dự án Window Thủy Triều V2.21", layout="wide")
+st.title("🌊 Phân Tích Thủy Triều (Bản V2.21 - Làm Tròn 5 Phút)")
 
 tz_vn = timezone(timedelta(hours=7))
 now_vn = datetime.now(tz_vn)
@@ -54,10 +54,14 @@ if file_source:
             df = pd.read_csv(file_source)
         else:
             xl = pd.ExcelFile(file_source)
+            
             if 'CL' in xl.sheet_names:
                 has_cl_data = True
                 df_cl = xl.parse('CL')
                 df_cl.columns = df_cl.columns.astype(str).str.strip().str.upper()
+                df_cl = df_cl.dropna(subset=['TIME']).copy() 
+                df_cl['DATE'] = df_cl['DATE'].ffill()
+                
                 dts_f28 = []
                 for _, r in df_cl.iterrows():
                     try:
@@ -72,6 +76,9 @@ if file_source:
                 has_cm_data = True
                 df_cm = xl.parse('CM')
                 df_cm.columns = df_cm.columns.astype(str).str.strip().str.upper()
+                df_cm = df_cm.dropna(subset=['TIME']).copy()
+                df_cm['DATE'] = df_cm['DATE'].ffill()
+                
                 dts_f28cm = []
                 for _, r in df_cm.iterrows():
                     try:
@@ -81,11 +88,14 @@ if file_source:
                         dts_f28cm.append(d + pd.Timedelta(hours=h, minutes=m))
                     except: continue
                 df_f28cm = pd.DataFrame({'F28_DT': dts_f28cm}).dropna().sort_values('F28_DT')
+            
             df = xl.parse('HLW-VT')
 
         df.columns = df.columns.str.strip()
         col_time_orig = 'HL Water'
         col_level = 'Level(m)'
+        df = df.dropna(subset=[col_time_orig, col_level]).copy()
+        
         df[col_level] = pd.to_numeric(df[col_level], errors='coerce')
         df['Parsed_Date'] = pd.to_datetime(df['Date'], errors='coerce').bfill(limit=1).ffill()
         
@@ -201,16 +211,16 @@ if file_source:
                 else:                  return 2.0 if is_before else 1.5
 
         # ==========================================
-        # BƯỚC 2: THUẬT TOÁN 1/12 NỘI SUY WINDOW
+        # BƯỚC 2: THUẬT TOÁN NỘI SUY WINDOW LÀM TRÒN 5 PHÚT
         # ==========================================
         def calc_window(t_slack, boundary_slack, th_mins, amp, target_knot, is_before):
             if pd.isna(t_slack) or pd.isna(th_mins) or pd.isna(amp) or th_mins <= 0 or amp <= 0: return "-"
             
-            # Tính tốc độ gán vào điểm kết thúc của từng Giờ Triều (TH 1, TH 2, TH 3)
             speeds = [0, (1/12 * amp) / 0.2, (2/12 * amp) / 0.2, (3/12 * amp) / 0.2] 
             
             if target_knot > speeds[-1]: 
-                res_time = boundary_slack.round('min')
+                # Nếu thông con nước, làm tròn mốc Slack kề trước/sau về 5 phút
+                res_time = boundary_slack.round('5min')
             else:
                 res_time = None
                 for k in range(1, 4):
@@ -219,7 +229,8 @@ if file_source:
                         delta_mins = (k - 1 + frac) * th_mins
                         
                         res_time = t_slack - pd.Timedelta(minutes=delta_mins) if is_before else t_slack + pd.Timedelta(minutes=delta_mins)
-                        res_time = res_time.round('min')
+                        # Làm tròn kết quả nội suy về 5 phút gần nhất
+                        res_time = res_time.round('5min')
                         break
             
             if res_time is not None:
@@ -250,7 +261,6 @@ if file_source:
             else: e_cl.append("-")
             
             # ================== WINDOW CÁI MÉP ==================
-            # Giữ nguyên mốc an toàn truyền thống (1.0 / 0.8) cho Cái Mép (Hoặc gọi ma trận nếu muốn)
             if i > 0:
                 boundary_prev = df_calc['SlackCM_DT'][i-1]
                 dur_bef = (df_calc['SlackCM_DT'][i] - boundary_prev).total_seconds() / 60
