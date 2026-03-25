@@ -16,8 +16,8 @@ try:
 except:
     flag_html = "🇻🇳 " 
 
-st.set_page_config(page_title="Dự án Window Thủy Triều V2.28", layout="wide")
-st.title("🌊 Phân Tích Thủy Triều (Bản V2.28 - Universal Target 2.3/1.6)")
+st.set_page_config(page_title="Dự án Window Thủy Triều V2.30", layout="wide")
+st.title("🌊 Phân Tích Thủy Triều (Bản V2.30 - Target 2.1/1.5)")
 
 tz_vn = timezone(timedelta(hours=7))
 now_vn = datetime.now(tz_vn)
@@ -110,13 +110,12 @@ if file_source:
         df['Event_Datetime'] = base_dts
         df_clean = df.dropna(subset=['Event_Datetime', col_level]).sort_values('Event_Datetime').reset_index(drop=True)
         
-        # SỬ DỤNG BỘ LỌC BÓNG MA (GHOST FILTER V2)
+        # BỘ LỌC BÓNG MA V2 (Chỉ xóa khi nước đứng im 100%, giữ lại nước ương)
         df_clean['Amplitude'] = abs(df_clean[col_level] - df_clean[col_level].shift(1))
         df_clean['Ký hiệu'] = np.where(df_clean[col_level] > df_clean[col_level].shift(1), 'HW', 'LW')
 
         valid_indices = []
         for idx, row in df_clean.iterrows():
-            # Chỉ xóa dòng nếu mực nước Y HỆT dòng trước (Biên độ = 0.0)
             if pd.notna(row['Amplitude']) and row['Amplitude'] == 0.0:
                 continue
             valid_indices.append(idx)
@@ -191,28 +190,23 @@ if file_source:
         df_calc['SlackCM_DT'] = final_cm_dts
 
         # ==========================================
-        # BƯỚC 2: THUẬT TOÁN TÌM GIỜ TARGET (THEO HẰNG SỐ CỦA THUYỀN TRƯỞNG)
+        # BƯỚC 2: THUẬT TOÁN TÌM GIỜ TARGET
         # ==========================================
         def calc_window_dt(t_slack, boundary_slack, dt_mins, amp, target_knot, is_before):
-            # Nếu mất data hoặc lỗi chia 0 thì bỏ qua
             if pd.isna(t_slack) or pd.isna(dt_mins) or pd.isna(amp) or dt_mins <= 0 or amp <= 0: 
                 return None
             
-            th_mins = dt_mins / 6.0 # Giờ triều
+            th_mins = dt_mins / 6.0 
             
-            # Khởi tạo ma trận vận tốc dòng chảy dựa trên biên độ thực tế
             speeds = [
                 0, 
                 (1/12 * amp) / 0.2, 
                 (2/12 * amp) / 0.2, 
-                (3/12 * amp) / 0.2  # Max Speed ở giữa sông
+                (3/12 * amp) / 0.2
             ] 
             
-            # TRƯỜNG HỢP NƯỚC YẾU (THÔNG)
             if target_knot > speeds[-1]: 
-                return boundary_slack.round('5min') # Mở rộng toang cửa sổ về sát mốc Slack kế tiếp
-            
-            # TRƯỜNG HỢP NƯỚC LỚN: TÌM GIỜ BẰNG NỘI SUY TUYẾN TÍNH
+                return boundary_slack.round('5min') 
             else:
                 for k in range(1, 4):
                     if speeds[k-1] <= target_knot <= speeds[k]:
@@ -230,15 +224,15 @@ if file_source:
             elif dt_val.date() < ref_dt.date(): time_str += ' (-1)'
             return time_str
 
-        # KHAI BÁO MỐC TARGET CHỐT HẠ THEO CHỈ THỊ
-        TARGET_BEGIN_CL = 2.3
-        TARGET_END_CL = 1.6
+        # MỐC TARGET ĐÃ CHỐT HẠ THEO CHỈ THỊ (2.1 / 1.5)
+        TARGET_BEGIN_CL = 2.1
+        TARGET_END_CL = 1.5
         
         raw_b_cl, raw_e_cl = [], []
         raw_b_cm, raw_e_cm = [], []
         
         for i in range(len(df_calc)):
-            # TÍNH TOÁN CHO TRẠM CÁT LÁI
+            # Cát Lái
             if i > 0:
                 boundary_prev = df_calc['SlackCL_DT'][i-1]
                 dur_bef = (df_calc['SlackCL_DT'][i] - boundary_prev).total_seconds() / 60
@@ -253,7 +247,7 @@ if file_source:
                 raw_e_cl.append(calc_window_dt(df_calc['SlackCL_DT'][i], boundary_next, dur_aft, amp_aft, TARGET_END_CL, False))
             else: raw_e_cl.append(None)
             
-            # TÍNH TOÁN CHO TRẠM CÁI MÉP (Tạm giữ 1.0/0.8 cho CM theo logic cũ)
+            # Cái Mép (Vẫn giữ 1.0/0.8 cho CM)
             if i > 0:
                 boundary_prev = df_calc['SlackCM_DT'][i-1]
                 dur_bef = (df_calc['SlackCM_DT'][i] - boundary_prev).total_seconds() / 60
