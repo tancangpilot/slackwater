@@ -16,14 +16,14 @@ try:
 except:
     flag_html = "🇻🇳 " 
 
-st.set_page_config(page_title="Dự án Window Thủy Triều V2.24", layout="wide")
-st.title("🌊 Phân Tích Thủy Triều (Bản V2.24 - UI Chuỗi Tiếp Sức)")
+st.set_page_config(page_title="Dự án Window Thủy Triều V2.28", layout="wide")
+st.title("🌊 Phân Tích Thủy Triều (Bản V2.28 - Universal Target 2.3/1.6)")
 
 tz_vn = timezone(timedelta(hours=7))
 now_vn = datetime.now(tz_vn)
 
 # ==========================================
-# GIAO DIỆN HEADER
+# GIAO DIỆN HEADER VÀ UPLOAD FILE
 # ==========================================
 DEFAULT_FILE = "HLWVT 2026.xlsx"
 
@@ -110,21 +110,25 @@ if file_source:
         df['Event_Datetime'] = base_dts
         df_clean = df.dropna(subset=['Event_Datetime', col_level]).sort_values('Event_Datetime').reset_index(drop=True)
         
+        # SỬ DỤNG BỘ LỌC BÓNG MA (GHOST FILTER V2)
         df_clean['Amplitude'] = abs(df_clean[col_level] - df_clean[col_level].shift(1))
-        df_clean['Next_Amp'] = abs(df_clean[col_level].shift(-1) - df_clean[col_level])
         df_clean['Ký hiệu'] = np.where(df_clean[col_level] > df_clean[col_level].shift(1), 'HW', 'LW')
 
         valid_indices = []
         for idx, row in df_clean.iterrows():
-            amp_val = row['Amplitude'] if pd.notna(row['Amplitude']) else row['Next_Amp']
-            if amp_val > 0.4:
-                valid_indices.append(idx)
+            # Chỉ xóa dòng nếu mực nước Y HỆT dòng trước (Biên độ = 0.0)
+            if pd.notna(row['Amplitude']) and row['Amplitude'] == 0.0:
+                continue
+            valid_indices.append(idx)
+            
         df_calc = df_clean.loc[valid_indices].copy().reset_index(drop=True)
 
         res_cl, res_cm = [], []
         final_cl_dts, final_cm_dts = [], []
         
-        # BƯỚC 1: TÍNH SLACK FINAL CHO TOÀN BỘ DATA
+        # ==========================================
+        # BƯỚC 1: TÍNH SLACK FINAL (F28 & F28CM)
+        # ==========================================
         for idx, row in df_calc.iterrows():
             hw_lw, level, base_dt = row['Ký hiệu'], row[col_level], row['Event_Datetime']
             
@@ -143,7 +147,6 @@ if file_source:
                 elif level >= 0.5: delta_cl = 230 
                 else: delta_cl = 235 
             
-            # Tính CL
             cl_dt = base_dt + pd.Timedelta(minutes=delta_cl)
             cl_s = cl_dt.strftime('%H:%M') + (' (+1)' if cl_dt.date() > base_dt.date() else '')
             final_cl_dt = cl_dt
@@ -164,7 +167,6 @@ if file_source:
             final_cl_dts.append(final_cl_dt)
             res_cl.append([cl_s, f28_s, diff_s, final_s, arr])
 
-            # Tính CM
             cm_dt = base_dt + pd.Timedelta(minutes=delta_cm)
             cm_s = cm_dt.strftime('%H:%M') + (' (+1)' if cm_dt.date() > base_dt.date() else '')
             final_cm_dt = cm_dt
@@ -189,41 +191,28 @@ if file_source:
         df_calc['SlackCM_DT'] = final_cm_dts
 
         # ==========================================
-        # MA TRẬN 20 Ô (DYNAMIC TARGET KNOTS CHO CÁT LÁI)
+        # BƯỚC 2: THUẬT TOÁN TÌM GIỜ TARGET (THEO HẰNG SỐ CỦA THUYỀN TRƯỞNG)
         # ==========================================
-        def get_dynamic_knot(amp, dt_mins, is_before):
-            if amp <= 0.8:
-                if dt_mins <= 270:     return 1.0 if is_before else 0.8
-                elif dt_mins <= 355:   return 1.2 if is_before else 1.0
-                else:                  return 999.0
-            elif amp <= 1.2:
-                if dt_mins <= 270:     return 0.8 if is_before else 0.6
-                elif dt_mins <= 355:   return 1.5 if is_before else 1.2
-                elif dt_mins <= 390:   return 2.0 if is_before else 1.5
-                else:                  return 999.0
-            elif amp <= 2.0:
-                if dt_mins <= 270:     return 0.6 if is_before else 0.45
-                elif dt_mins <= 355:   return 1.5 if is_before else 1.2
-                elif dt_mins <= 390:   return 2.0 if is_before else 1.5
-                elif dt_mins <= 480:   return 2.0 if is_before else 1.5
-                else:                  return 2.5 if is_before else 1.5
-            else:
-                if dt_mins <= 270:     return 0.4 if is_before else 0.3
-                elif dt_mins <= 355:   return 1.0 if is_before else 0.8
-                elif dt_mins <= 390:   return 1.5 if is_before else 1.2
-                elif dt_mins <= 480:   return 2.0 if is_before else 1.5
-                else:                  return 2.5 if is_before else 1.5
-
-        # ==========================================
-        # BƯỚC 2: THUẬT TOÁN NỘI SUY (TRẢ VỀ DATETIME)
-        # ==========================================
-        def calc_window_dt(t_slack, boundary_slack, th_mins, amp, target_knot, is_before):
-            if pd.isna(t_slack) or pd.isna(th_mins) or pd.isna(amp) or th_mins <= 0 or amp <= 0: return None
+        def calc_window_dt(t_slack, boundary_slack, dt_mins, amp, target_knot, is_before):
+            # Nếu mất data hoặc lỗi chia 0 thì bỏ qua
+            if pd.isna(t_slack) or pd.isna(dt_mins) or pd.isna(amp) or dt_mins <= 0 or amp <= 0: 
+                return None
             
-            speeds = [0, (1/12 * amp) / 0.2, (2/12 * amp) / 0.2, (3/12 * amp) / 0.2] 
+            th_mins = dt_mins / 6.0 # Giờ triều
             
+            # Khởi tạo ma trận vận tốc dòng chảy dựa trên biên độ thực tế
+            speeds = [
+                0, 
+                (1/12 * amp) / 0.2, 
+                (2/12 * amp) / 0.2, 
+                (3/12 * amp) / 0.2  # Max Speed ở giữa sông
+            ] 
+            
+            # TRƯỜNG HỢP NƯỚC YẾU (THÔNG)
             if target_knot > speeds[-1]: 
-                return boundary_slack.round('5min')
+                return boundary_slack.round('5min') # Mở rộng toang cửa sổ về sát mốc Slack kế tiếp
+            
+            # TRƯỜNG HỢP NƯỚC LỚN: TÌM GIỜ BẰNG NỘI SUY TUYẾN TÍNH
             else:
                 for k in range(1, 4):
                     if speeds[k-1] <= target_knot <= speeds[k]:
@@ -241,50 +230,51 @@ if file_source:
             elif dt_val.date() < ref_dt.date(): time_str += ' (-1)'
             return time_str
 
+        # KHAI BÁO MỐC TARGET CHỐT HẠ THEO CHỈ THỊ
+        TARGET_BEGIN_CL = 2.3
+        TARGET_END_CL = 1.6
+        
         raw_b_cl, raw_e_cl = [], []
         raw_b_cm, raw_e_cm = [], []
         
         for i in range(len(df_calc)):
-            # Tính Cát Lái
+            # TÍNH TOÁN CHO TRẠM CÁT LÁI
             if i > 0:
                 boundary_prev = df_calc['SlackCL_DT'][i-1]
                 dur_bef = (df_calc['SlackCL_DT'][i] - boundary_prev).total_seconds() / 60
                 amp_bef = abs(df_calc[col_level][i] - df_calc[col_level][i-1])
-                target_b_cl = get_dynamic_knot(amp_bef, dur_bef, True)
-                raw_b_cl.append(calc_window_dt(df_calc['SlackCL_DT'][i], boundary_prev, dur_bef/6, amp_bef, target_b_cl, True))
+                raw_b_cl.append(calc_window_dt(df_calc['SlackCL_DT'][i], boundary_prev, dur_bef, amp_bef, TARGET_BEGIN_CL, True))
             else: raw_b_cl.append(None)
             
             if i < len(df_calc) - 1:
                 boundary_next = df_calc['SlackCL_DT'][i+1]
                 dur_aft = (boundary_next - df_calc['SlackCL_DT'][i]).total_seconds() / 60
                 amp_aft = abs(df_calc[col_level][i+1] - df_calc[col_level][i])
-                target_e_cl = get_dynamic_knot(amp_aft, dur_aft, False)
-                raw_e_cl.append(calc_window_dt(df_calc['SlackCL_DT'][i], boundary_next, dur_aft/6, amp_aft, target_e_cl, False))
+                raw_e_cl.append(calc_window_dt(df_calc['SlackCL_DT'][i], boundary_next, dur_aft, amp_aft, TARGET_END_CL, False))
             else: raw_e_cl.append(None)
             
-            # Tính Cái Mép
+            # TÍNH TOÁN CHO TRẠM CÁI MÉP (Tạm giữ 1.0/0.8 cho CM theo logic cũ)
             if i > 0:
                 boundary_prev = df_calc['SlackCM_DT'][i-1]
                 dur_bef = (df_calc['SlackCM_DT'][i] - boundary_prev).total_seconds() / 60
                 amp_bef = abs(df_calc[col_level][i] - df_calc[col_level][i-1])
-                raw_b_cm.append(calc_window_dt(df_calc['SlackCM_DT'][i], boundary_prev, dur_bef/6, amp_bef, 1.0, True))
+                raw_b_cm.append(calc_window_dt(df_calc['SlackCM_DT'][i], boundary_prev, dur_bef, amp_bef, 1.0, True))
             else: raw_b_cm.append(None)
             
             if i < len(df_calc) - 1:
                 boundary_next = df_calc['SlackCM_DT'][i+1]
                 dur_aft = (boundary_next - df_calc['SlackCM_DT'][i]).total_seconds() / 60
                 amp_aft = abs(df_calc[col_level][i+1] - df_calc[col_level][i])
-                raw_e_cm.append(calc_window_dt(df_calc['SlackCM_DT'][i], boundary_next, dur_aft/6, amp_aft, 0.8, False))
+                raw_e_cm.append(calc_window_dt(df_calc['SlackCM_DT'][i], boundary_next, dur_aft, amp_aft, 0.8, False))
             else: raw_e_cm.append(None)
 
         # ==========================================
-        # BƯỚC 3: XỬ LÝ NỐI CHUỖI LIỀN MẠCH (RELAY RACE)
+        # BƯỚC 3: XỬ LÝ RELAY RACE (NỐI CHUỖI CỬA SỔ)
         # ==========================================
         b_cl, e_cl = [], []
         b_cm, e_cm = [], []
         
         for i in range(len(df_calc)):
-            # Cát Lái
             b_cl_val = raw_b_cl[i]
             if i > 0 and b_cl_val is not None and raw_e_cl[i-1] is not None:
                 if b_cl_val < raw_e_cl[i-1]:  
@@ -292,7 +282,6 @@ if file_source:
             b_cl.append(format_dt(b_cl_val, df_calc['SlackCL_DT'][i]))
             e_cl.append(format_dt(raw_e_cl[i], df_calc['SlackCL_DT'][i]))
 
-            # Cái Mép
             b_cm_val = raw_b_cm[i]
             if i > 0 and b_cm_val is not None and raw_e_cm[i-1] is not None:
                 if b_cm_val < raw_e_cm[i-1]:
@@ -312,7 +301,7 @@ if file_source:
         df_cm_full = pd.concat([df_calc[['Parsed_Date', 'Ký hiệu', col_time_orig, col_level]], cm_df], axis=1)
 
         # ==========================================
-        # GIAO DIỆN ĐIỀU KHIỂN
+        # BƯỚC 4: RENDER GIAO DIỆN CHÍNH
         # ==========================================
         st.markdown("---")
         col_label, col_radio = st.columns([1.2, 8.8])
@@ -349,30 +338,20 @@ if file_source:
             if 'Dir' in sel_cols:
                 styler.map(lambda x: 'font-weight: bold; color: #007bff; font-size: 22px;' if '↙' in str(x) else ('font-weight: bold; color: #dc3545; font-size: 22px;' if '↗' in str(x) else ''), subset=['Dir'])
             
-            # ==========================================
-            # BỘ LỌC ĐỔI MÀU "CHUỖI TIẾP SỨC"
-            # ==========================================
             def highlight_relay(data):
                 css = pd.DataFrame('', index=data.index, columns=data.columns)
-                
-                # Màu Cam mặc định cho các cửa sổ độc lập
                 win_cols = [c for c in ['Begin Window', 'End Window'] if c in data.columns]
                 for c in win_cols:
                     css[c] = np.where(data[c] != "-", 'background-color: #fdf2e9; font-weight: bold; color: #d35400;', '')
                 
-                # Màu Xanh Lục Bảo cho các cặp nối tiếp
                 if 'Begin Window' in data.columns and 'End Window' in data.columns:
                     indices = data.index.tolist()
                     for i in range(1, len(indices)):
                         idx_prev = indices[i-1]
                         idx_curr = indices[i]
-                        
-                        # Chỉ soi các dòng liền kề thực sự
                         if idx_curr == idx_prev + 1:
                             prev_end = data.loc[idx_prev, 'End Window']
                             curr_begin = data.loc[idx_curr, 'Begin Window']
-                            
-                            # Nếu giờ chốt trùng nhau, tô sáng cả hai ô
                             if prev_end == curr_begin and prev_end != "-":
                                 relay_style = 'background-color: #d4edda; font-weight: 900; color: #0e6655; font-size: 15px; border-bottom: 2px solid #28b463;'
                                 css.loc[idx_prev, 'End Window'] = relay_style
@@ -380,7 +359,6 @@ if file_source:
                 return css
 
             styler.apply(highlight_relay, axis=None)
-            
             return styler
 
         tab_cl, tab_cm = st.tabs(["⚓ TRẠM CÁT LÁI", "🚢 TRẠM CÁI MÉP"])
