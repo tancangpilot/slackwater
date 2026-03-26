@@ -16,8 +16,8 @@ try:
 except:
     flag_html = "🇻🇳 " 
 
-st.set_page_config(page_title="Dự án Window Thủy Triều V2.33", layout="wide")
-st.title("🌊 Phân Tích Thủy Triều (V2.33)")
+st.set_page_config(page_title="Dự án Window Thủy Triều V2.34", layout="wide")
+st.title("🌊 Phân Tích Thủy Triều (Bản V2.34)")
 
 tz_vn = timezone(timedelta(hours=7))
 now_vn = datetime.now(tz_vn)
@@ -192,6 +192,11 @@ if file_source:
         # ==========================================
         # BƯỚC 2: THUẬT TOÁN TÌM GIỜ TARGET
         # ==========================================
+        def floor_to_15min(dt_obj):
+            """Hàm làm tròn đẩy sớm về mốc 15 phút (00, 15, 30, 45)"""
+            if pd.isna(dt_obj) or dt_obj is None: return None
+            return dt_obj.replace(minute=(dt_obj.minute // 15) * 15, second=0, microsecond=0)
+
         def calc_window_dt(t_slack, boundary_slack, dt_mins, amp, target_knot, is_before):
             if pd.isna(t_slack) or pd.isna(dt_mins) or pd.isna(amp) or dt_mins <= 0 or amp <= 0: 
                 return None
@@ -200,7 +205,7 @@ if file_source:
             speeds = [0, (1/12 * amp) / 0.2, (2/12 * amp) / 0.2, (3/12 * amp) / 0.2] 
             
             if target_knot > speeds[-1]: 
-                return boundary_slack.round('5min') 
+                return floor_to_15min(boundary_slack) # Báo Thông nhưng vẫn bo tròn 15p cho sạch số
             else:
                 for k in range(1, 4):
                     if speeds[k-1] <= target_knot <= speeds[k]:
@@ -208,7 +213,7 @@ if file_source:
                         delta_mins = (k - 1 + frac) * th_mins
                         
                         res_time = t_slack - pd.Timedelta(minutes=delta_mins) if is_before else t_slack + pd.Timedelta(minutes=delta_mins)
-                        return res_time.round('5min')
+                        return floor_to_15min(res_time) # Cắt gọt số lẻ thành block 15p đẩy sớm
             return None
 
         def format_dt(dt_val, ref_dt):
@@ -393,7 +398,6 @@ if file_source:
             f_cl[col_level] = f_cl[col_level].map('{:.1f}'.format)
             
             all_cols_cl = f_cl.columns.tolist()
-            # Đã bổ sung 'Dir' vào hiển thị mặc định Cát Lái
             default_cols_cl = ['Date', 'HLW Vung Tau', 'Time', 'Level(m)', 'SlackCL Final', 'Dir', 'Begin Window', 'End Window']
             sel_cl = st.multiselect("⚙️ Ẩn/Hiện cột (Cát Lái):", all_cols_cl, default=default_cols_cl, key="ms_cl")
             st.dataframe(style_tab_table(f_cl[sel_cl].style, sel_cl, is_cl=True), use_container_width=True, hide_index=True, height=600)
@@ -406,7 +410,6 @@ if file_source:
             f_cm[col_level] = f_cm[col_level].map('{:.1f}'.format)
             
             all_cols_cm = f_cm.columns.tolist()
-            # Đã bổ sung 'Dir' vào hiển thị mặc định Cái Mép
             default_cols_cm = ['Date', 'HLW Vung Tau', 'Time', 'Level(m)', 'SlackCM Final', 'Dir', 'Begin Tàu Lớn (1.5)', 'End Tàu Lớn (1.0)', 'Begin Tàu Nhỏ (2.3)', 'End Tàu Nhỏ (1.6)']
             sel_cm = st.multiselect("⚙️ Ẩn/Hiện cột (Cái Mép):", all_cols_cm, default=default_cols_cm, key="ms_cm")
             st.dataframe(style_tab_table(f_cm[sel_cm].style, sel_cm, is_cl=False), use_container_width=True, hide_index=True, height=600)
