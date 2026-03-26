@@ -16,8 +16,8 @@ try:
 except:
     flag_html = "🇻🇳 " 
 
-st.set_page_config(page_title="Dự án Window Thủy Triều V2.30", layout="wide")
-st.title("🌊 Phân Tích Thủy Triều (Bản V2.30 - Target 2.1/1.5)")
+st.set_page_config(page_title="Dự án Window Thủy Triều V2.33", layout="wide")
+st.title("🌊 Phân Tích Thủy Triều (V2.33")
 
 tz_vn = timezone(timedelta(hours=7))
 now_vn = datetime.now(tz_vn)
@@ -110,7 +110,7 @@ if file_source:
         df['Event_Datetime'] = base_dts
         df_clean = df.dropna(subset=['Event_Datetime', col_level]).sort_values('Event_Datetime').reset_index(drop=True)
         
-        # BỘ LỌC BÓNG MA V2 (Chỉ xóa khi nước đứng im 100%, giữ lại nước ương)
+        # BỘ LỌC BÓNG MA V2
         df_clean['Amplitude'] = abs(df_clean[col_level] - df_clean[col_level].shift(1))
         df_clean['Ký hiệu'] = np.where(df_clean[col_level] > df_clean[col_level].shift(1), 'HW', 'LW')
 
@@ -197,13 +197,7 @@ if file_source:
                 return None
             
             th_mins = dt_mins / 6.0 
-            
-            speeds = [
-                0, 
-                (1/12 * amp) / 0.2, 
-                (2/12 * amp) / 0.2, 
-                (3/12 * amp) / 0.2
-            ] 
+            speeds = [0, (1/12 * amp) / 0.2, (2/12 * amp) / 0.2, (3/12 * amp) / 0.2] 
             
             if target_knot > speeds[-1]: 
                 return boundary_slack.round('5min') 
@@ -224,15 +218,22 @@ if file_source:
             elif dt_val.date() < ref_dt.date(): time_str += ' (-1)'
             return time_str
 
-        # MỐC TARGET ĐÃ CHỐT HẠ THEO CHỈ THỊ (2.1 / 1.5)
+        # CÁC MỐC TARGET CHỐT HẠ
         TARGET_BEGIN_CL = 2.1
         TARGET_END_CL = 1.5
         
+        TARGET_BEGIN_CM1 = 1.5  # Cái Mép: Tàu rất to (330m-370m)
+        TARGET_END_CM1 = 1.0
+        
+        TARGET_BEGIN_CM2 = 2.3  # Cái Mép: Tàu nhỏ (Sông to nên giãn được)
+        TARGET_END_CM2 = 1.6
+        
         raw_b_cl, raw_e_cl = [], []
-        raw_b_cm, raw_e_cm = [], []
+        raw_b_cm1, raw_e_cm1 = [], []
+        raw_b_cm2, raw_e_cm2 = [], []
         
         for i in range(len(df_calc)):
-            # Cát Lái
+            # CÁT LÁI
             if i > 0:
                 boundary_prev = df_calc['SlackCL_DT'][i-1]
                 dur_bef = (df_calc['SlackCL_DT'][i] - boundary_prev).total_seconds() / 60
@@ -247,28 +248,36 @@ if file_source:
                 raw_e_cl.append(calc_window_dt(df_calc['SlackCL_DT'][i], boundary_next, dur_aft, amp_aft, TARGET_END_CL, False))
             else: raw_e_cl.append(None)
             
-            # Cái Mép (Vẫn giữ 1.0/0.8 cho CM)
+            # CÁI MÉP (TÍNH 2 LUỒNG)
             if i > 0:
                 boundary_prev = df_calc['SlackCM_DT'][i-1]
                 dur_bef = (df_calc['SlackCM_DT'][i] - boundary_prev).total_seconds() / 60
                 amp_bef = abs(df_calc[col_level][i] - df_calc[col_level][i-1])
-                raw_b_cm.append(calc_window_dt(df_calc['SlackCM_DT'][i], boundary_prev, dur_bef, amp_bef, 1.0, True))
-            else: raw_b_cm.append(None)
+                raw_b_cm1.append(calc_window_dt(df_calc['SlackCM_DT'][i], boundary_prev, dur_bef, amp_bef, TARGET_BEGIN_CM1, True))
+                raw_b_cm2.append(calc_window_dt(df_calc['SlackCM_DT'][i], boundary_prev, dur_bef, amp_bef, TARGET_BEGIN_CM2, True))
+            else: 
+                raw_b_cm1.append(None)
+                raw_b_cm2.append(None)
             
             if i < len(df_calc) - 1:
                 boundary_next = df_calc['SlackCM_DT'][i+1]
                 dur_aft = (boundary_next - df_calc['SlackCM_DT'][i]).total_seconds() / 60
                 amp_aft = abs(df_calc[col_level][i+1] - df_calc[col_level][i])
-                raw_e_cm.append(calc_window_dt(df_calc['SlackCM_DT'][i], boundary_next, dur_aft, amp_aft, 0.8, False))
-            else: raw_e_cm.append(None)
+                raw_e_cm1.append(calc_window_dt(df_calc['SlackCM_DT'][i], boundary_next, dur_aft, amp_aft, TARGET_END_CM1, False))
+                raw_e_cm2.append(calc_window_dt(df_calc['SlackCM_DT'][i], boundary_next, dur_aft, amp_aft, TARGET_END_CM2, False))
+            else: 
+                raw_e_cm1.append(None)
+                raw_e_cm2.append(None)
 
         # ==========================================
         # BƯỚC 3: XỬ LÝ RELAY RACE (NỐI CHUỖI CỬA SỔ)
         # ==========================================
         b_cl, e_cl = [], []
-        b_cm, e_cm = [], []
+        b_cm1, e_cm1 = [], []
+        b_cm2, e_cm2 = [], []
         
         for i in range(len(df_calc)):
+            # Cát Lái
             b_cl_val = raw_b_cl[i]
             if i > 0 and b_cl_val is not None and raw_e_cl[i-1] is not None:
                 if b_cl_val < raw_e_cl[i-1]:  
@@ -276,20 +285,31 @@ if file_source:
             b_cl.append(format_dt(b_cl_val, df_calc['SlackCL_DT'][i]))
             e_cl.append(format_dt(raw_e_cl[i], df_calc['SlackCL_DT'][i]))
 
-            b_cm_val = raw_b_cm[i]
-            if i > 0 and b_cm_val is not None and raw_e_cm[i-1] is not None:
-                if b_cm_val < raw_e_cm[i-1]:
-                    b_cm_val = raw_e_cm[i-1]
-            b_cm.append(format_dt(b_cm_val, df_calc['SlackCM_DT'][i]))
-            e_cm.append(format_dt(raw_e_cm[i], df_calc['SlackCM_DT'][i]))
+            # Cái Mép Tàu Lớn
+            b_cm1_val = raw_b_cm1[i]
+            if i > 0 and b_cm1_val is not None and raw_e_cm1[i-1] is not None:
+                if b_cm1_val < raw_e_cm1[i-1]:
+                    b_cm1_val = raw_e_cm1[i-1]
+            b_cm1.append(format_dt(b_cm1_val, df_calc['SlackCM_DT'][i]))
+            e_cm1.append(format_dt(raw_e_cm1[i], df_calc['SlackCM_DT'][i]))
+
+            # Cái Mép Tàu Nhỏ
+            b_cm2_val = raw_b_cm2[i]
+            if i > 0 and b_cm2_val is not None and raw_e_cm2[i-1] is not None:
+                if b_cm2_val < raw_e_cm2[i-1]:
+                    b_cm2_val = raw_e_cm2[i-1]
+            b_cm2.append(format_dt(b_cm2_val, df_calc['SlackCM_DT'][i]))
+            e_cm2.append(format_dt(raw_e_cm2[i], df_calc['SlackCM_DT'][i]))
 
         cl_df = pd.DataFrame(res_cl, columns=['Slack CL', 'Slack F28CL', 'DiffCLF28', 'SlackCL Final', 'Dir'])
         cl_df['Begin Window'] = b_cl
         cl_df['End Window'] = e_cl
         
         cm_df = pd.DataFrame(res_cm, columns=['Slack CM', 'Slack F28CM', 'DiffCMF28', 'SlackCM Final', 'Dir'])
-        cm_df['Begin Window'] = b_cm
-        cm_df['End Window'] = e_cm
+        cm_df['Begin Tàu Lớn (1.5)'] = b_cm1
+        cm_df['End Tàu Lớn (1.0)'] = e_cm1
+        cm_df['Begin Tàu Nhỏ (2.3)'] = b_cm2
+        cm_df['End Tàu Nhỏ (1.6)'] = e_cm2
 
         df_cl_full = pd.concat([df_calc[['Parsed_Date', 'Ký hiệu', col_time_orig, col_level]], cl_df], axis=1)
         df_cm_full = pd.concat([df_calc[['Parsed_Date', 'Ký hiệu', col_time_orig, col_level]], cm_df], axis=1)
@@ -334,22 +354,30 @@ if file_source:
             
             def highlight_relay(data):
                 css = pd.DataFrame('', index=data.index, columns=data.columns)
-                win_cols = [c for c in ['Begin Window', 'End Window'] if c in data.columns]
-                for c in win_cols:
-                    css[c] = np.where(data[c] != "-", 'background-color: #fdf2e9; font-weight: bold; color: #d35400;', '')
                 
-                if 'Begin Window' in data.columns and 'End Window' in data.columns:
-                    indices = data.index.tolist()
-                    for i in range(1, len(indices)):
-                        idx_prev = indices[i-1]
-                        idx_curr = indices[i]
-                        if idx_curr == idx_prev + 1:
-                            prev_end = data.loc[idx_prev, 'End Window']
-                            curr_begin = data.loc[idx_curr, 'Begin Window']
-                            if prev_end == curr_begin and prev_end != "-":
-                                relay_style = 'background-color: #d4edda; font-weight: 900; color: #0e6655; font-size: 15px; border-bottom: 2px solid #28b463;'
-                                css.loc[idx_prev, 'End Window'] = relay_style
-                                css.loc[idx_curr, 'Begin Window'] = relay_style
+                # Cặp cột cần tô màu Window
+                pairs = [
+                    ('Begin Window', 'End Window'), 
+                    ('Begin Tàu Lớn (1.5)', 'End Tàu Lớn (1.0)'), 
+                    ('Begin Tàu Nhỏ (2.3)', 'End Tàu Nhỏ (1.6)')
+                ]
+                
+                for b_col, e_col in pairs:
+                    if b_col in data.columns and e_col in data.columns:
+                        for c in [b_col, e_col]:
+                            css[c] = np.where(data[c] != "-", 'background-color: #fdf2e9; font-weight: bold; color: #d35400;', '')
+                            
+                        indices = data.index.tolist()
+                        for i in range(1, len(indices)):
+                            idx_prev = indices[i-1]
+                            idx_curr = indices[i]
+                            if idx_curr == idx_prev + 1:
+                                prev_end = data.loc[idx_prev, e_col]
+                                curr_begin = data.loc[idx_curr, b_col]
+                                if prev_end == curr_begin and prev_end != "-":
+                                    relay_style = 'background-color: #d4edda; font-weight: 900; color: #0e6655; font-size: 15px; border-bottom: 2px solid #28b463;'
+                                    css.loc[idx_prev, e_col] = relay_style
+                                    css.loc[idx_curr, b_col] = relay_style
                 return css
 
             styler.apply(highlight_relay, axis=None)
@@ -365,7 +393,9 @@ if file_source:
             f_cl[col_level] = f_cl[col_level].map('{:.1f}'.format)
             
             all_cols_cl = f_cl.columns.tolist()
-            sel_cl = st.multiselect("⚙️ Ẩn/Hiện cột (Cát Lái):", all_cols_cl, default=all_cols_cl, key="ms_cl")
+            # Đã bổ sung 'Dir' vào hiển thị mặc định Cát Lái
+            default_cols_cl = ['Date', 'HLW Vung Tau', 'Time', 'Level(m)', 'SlackCL Final', 'Dir', 'Begin Window', 'End Window']
+            sel_cl = st.multiselect("⚙️ Ẩn/Hiện cột (Cát Lái):", all_cols_cl, default=default_cols_cl, key="ms_cl")
             st.dataframe(style_tab_table(f_cl[sel_cl].style, sel_cl, is_cl=True), use_container_width=True, hide_index=True, height=600)
 
         with tab_cm:
@@ -376,7 +406,9 @@ if file_source:
             f_cm[col_level] = f_cm[col_level].map('{:.1f}'.format)
             
             all_cols_cm = f_cm.columns.tolist()
-            sel_cm = st.multiselect("⚙️ Ẩn/Hiện cột (Cái Mép):", all_cols_cm, default=all_cols_cm, key="ms_cm")
+            # Đã bổ sung 'Dir' vào hiển thị mặc định Cái Mép
+            default_cols_cm = ['Date', 'HLW Vung Tau', 'Time', 'Level(m)', 'SlackCM Final', 'Dir', 'Begin Tàu Lớn (1.5)', 'End Tàu Lớn (1.0)', 'Begin Tàu Nhỏ (2.3)', 'End Tàu Nhỏ (1.6)']
+            sel_cm = st.multiselect("⚙️ Ẩn/Hiện cột (Cái Mép):", all_cols_cm, default=default_cols_cm, key="ms_cm")
             st.dataframe(style_tab_table(f_cm[sel_cm].style, sel_cm, is_cl=False), use_container_width=True, hide_index=True, height=600)
 
     except Exception as e:
