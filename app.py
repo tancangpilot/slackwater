@@ -16,8 +16,8 @@ try:
 except:
     flag_html = "🇻🇳 " 
 
-st.set_page_config(page_title="Dự án Window Thủy Triều V2.35", layout="wide")
-st.title("🌊 Phân Tích Thủy Triều (Bản V2.35)")
+st.set_page_config(page_title="Dự án Window Thủy Triều V2.37", layout="wide")
+st.title("🌊 Phân Tích Thủy Triều (Bản V2.37)")
 
 tz_vn = timezone(timedelta(hours=7))
 now_vn = datetime.now(tz_vn)
@@ -224,9 +224,11 @@ if file_source:
 
         TARGET_BEGIN_CL = 2.1
         TARGET_END_CL = 1.5
-        TARGET_BEGIN_CM1 = 1.5  
+        
+        TARGET_BEGIN_CM1 = 1.2  # Cái Mép: Tàu rất to (LOA 300m+)
         TARGET_END_CM1 = 1.0
-        TARGET_BEGIN_CM2 = 2.3  
+        
+        TARGET_BEGIN_CM2 = 2.3  # Cái Mép: Tàu nhỏ (Small VSL)
         TARGET_END_CM2 = 1.6
         
         raw_b_cl, raw_e_cl = [], []
@@ -289,7 +291,7 @@ if file_source:
             b_cl.append(format_dt(b_cl_val, df_calc['SlackCL_DT'][i]))
             e_cl.append(format_dt(raw_e_cl[i], df_calc['SlackCL_DT'][i]))
 
-            # 2. Nối Relay Cái Mép Tàu Lớn
+            # 2. Nối Relay Cái Mép Tàu Lớn (LOA300m)
             b_cm1_val = raw_b_cm1[i]
             if i > 0 and b_cm1_val is not None and raw_e_cm1[i-1] is not None:
                 if b_cm1_val < raw_e_cm1[i-1]:
@@ -299,7 +301,7 @@ if file_source:
             b_cm1.append(format_dt(b_cm1_val, df_calc['SlackCM_DT'][i]))
             e_cm1.append(format_dt(e_cm1_val, df_calc['SlackCM_DT'][i]))
 
-            # 3. Nối Relay Cái Mép Tàu Nhỏ
+            # 3. Nối Relay Cái Mép Tàu Nhỏ (Small VSL)
             b_cm2_val = raw_b_cm2[i]
             if i > 0 and b_cm2_val is not None and raw_e_cm2[i-1] is not None:
                 if b_cm2_val < raw_e_cm2[i-1]:
@@ -307,7 +309,7 @@ if file_source:
             b_cm2.append(format_dt(b_cm2_val, df_calc['SlackCM_DT'][i]))
             e_cm2.append(format_dt(raw_e_cm2[i], df_calc['SlackCM_DT'][i]))
             
-            # 4. TÍNH TOÁN POB CHO TÀU LỚN CÁI MÉP (Dựa trên b_cm1_val và e_cm1_val)
+            # 4. TÍNH TOÁN POB CHO TÀU LỚN CÁI MÉP
             hw_lw = df_calc['Ký hiệu'][i]
             slack_dt = df_calc['SlackCM_DT'][i]
             
@@ -319,39 +321,33 @@ if file_source:
             forbidden_port = False
 
             if hw_lw == 'HW':
-                # Nửa đầu: Nước dâng -> Cập Port
                 forbidden_port = (amp_bef < 0.4)
                 if b_cm1_val is not None and not forbidden_port:
                     pob_b_port = b_cm1_val - pd.Timedelta(minutes=105)
                     pob_e_port = slack_dt - pd.Timedelta(minutes=120)
                     if pob_b_port > pob_e_port: pob_b_port, pob_e_port = None, None
                 
-                # Nửa sau: Nước rút -> Cập Stb
                 if e_cm1_val is not None:
                     pob_b_stb = slack_dt - pd.Timedelta(minutes=105)
                     pob_e_stb = e_cm1_val - pd.Timedelta(minutes=105)
                     if pob_b_stb > pob_e_stb: pob_b_stb, pob_e_stb = None, None
             else:
-                # Nửa đầu: Nước rút -> Cập Stb
                 if b_cm1_val is not None:
                     pob_b_stb = b_cm1_val - pd.Timedelta(minutes=105)
                     pob_e_stb = slack_dt - pd.Timedelta(minutes=105)
                     if pob_b_stb > pob_e_stb: pob_b_stb, pob_e_stb = None, None
                 
-                # Nửa sau: Nước dâng -> Cập Port
                 forbidden_port = (amp_aft < 0.4)
                 if e_cm1_val is not None and not forbidden_port:
                     pob_b_port = slack_dt - pd.Timedelta(minutes=105)
                     pob_e_port = e_cm1_val - pd.Timedelta(minutes=120)
                     if pob_b_port > pob_e_port: pob_b_port, pob_e_port = None, None
 
-            # Làm tròn đẩy sớm (Block 15p)
             pob_b_stb = floor_to_15min(pob_b_stb)
             pob_e_stb = floor_to_15min(pob_e_stb)
             pob_b_port = floor_to_15min(pob_b_port)
             pob_e_port = floor_to_15min(pob_e_port)
 
-            # Đổ dữ liệu vào mảng
             pob_b_stb_list.append(format_dt(pob_b_stb, slack_dt))
             pob_e_stb_list.append(format_dt(pob_e_stb, slack_dt))
             
@@ -368,12 +364,11 @@ if file_source:
         cl_df['End Window'] = e_cl
         
         cm_df = pd.DataFrame(res_cm, columns=['Slack CM', 'Slack F28CM', 'DiffCMF28', 'SlackCM Final', 'Dir'])
-        cm_df['Begin Tàu Lớn (1.5)'] = b_cm1
-        cm_df['End Tàu Lớn (1.0)'] = e_cm1
-        cm_df['Begin Tàu Nhỏ (2.3)'] = b_cm2
-        cm_df['End Tàu Nhỏ (1.6)'] = e_cm2
+        cm_df['Begin LOA300m'] = b_cm1
+        cm_df['End LOA300m'] = e_cm1
+        cm_df['Begin Small VSL'] = b_cm2
+        cm_df['End Small VSL'] = e_cm2
         
-        # Thêm 4 cột POB cho Tàu Lớn
         cm_df['POB Begin Stb'] = pob_b_stb_list
         cm_df['POB End Stb'] = pob_e_stb_list
         cm_df['POB Begin Port'] = pob_b_port_list
@@ -423,11 +418,10 @@ if file_source:
             def highlight_relay(data):
                 css = pd.DataFrame('', index=data.index, columns=data.columns)
                 
-                # Nền cơ bản cho các cột Window gốc
                 pairs = [
                     ('Begin Window', 'End Window'), 
-                    ('Begin Tàu Lớn (1.5)', 'End Tàu Lớn (1.0)'), 
-                    ('Begin Tàu Nhỏ (2.3)', 'End Tàu Nhỏ (1.6)')
+                    ('Begin LOA300m', 'End LOA300m'), 
+                    ('Begin Small VSL', 'End Small VSL')
                 ]
                 for b_col, e_col in pairs:
                     if b_col in data.columns and e_col in data.columns:
@@ -446,7 +440,6 @@ if file_source:
                                     css.loc[idx_prev, e_col] = relay_style
                                     css.loc[idx_curr, b_col] = relay_style
 
-                # CSS Bôi màu chuyên biệt cho cột POB (Cái Mép)
                 pairs_pob = [
                     ('POB Begin Stb', 'POB End Stb'), 
                     ('POB Begin Port', 'POB End Port')
@@ -455,12 +448,9 @@ if file_source:
                     if b_col in data.columns and e_col in data.columns:
                         for c in [b_col, e_col]:
                             if 'Stb' in c:
-                                # Xanh lá cho mạn phải (Nước rút đi thẳng)
                                 css[c] = np.where((data[c] != "-") & (data[c] != "Cấm quay"), 'background-color: #e8f5e9; font-weight: bold; color: #2e7d32;', css[c])
                             else:
-                                # Đỏ cho mạn trái (Nước dâng quay đầu)
                                 css[c] = np.where((data[c] != "-") & (data[c] != "Cấm quay"), 'background-color: #ffebee; font-weight: bold; color: #c62828;', css[c])
-                                # Xám cho Cấm quay
                                 css[c] = np.where(data[c] == "Cấm quay", 'background-color: #f2f3f4; font-weight: bold; color: #909497; text-align: center;', css[c])
                 return css
 
@@ -489,8 +479,7 @@ if file_source:
             f_cm[col_level] = f_cm[col_level].map('{:.1f}'.format)
             
             all_cols_cm = f_cm.columns.tolist()
-            # Bật mặc định hiển thị 4 cột POB để Thuyền trưởng kiểm chứng
-            default_cols_cm = ['Date', 'HLW Vung Tau', 'Time', 'Level(m)', 'SlackCM Final', 'Dir', 'POB Begin Stb', 'POB End Stb', 'POB Begin Port', 'POB End Port', 'Begin Tàu Lớn (1.5)', 'End Tàu Lớn (1.0)']
+            default_cols_cm = ['Date', 'HLW Vung Tau', 'Time', 'Level(m)', 'SlackCM Final', 'Dir', 'POB Begin Stb', 'POB End Stb', 'POB Begin Port', 'POB End Port', 'Begin LOA300m', 'End LOA300m', 'Begin Small VSL', 'End Small VSL']
             sel_cm = st.multiselect("⚙️ Ẩn/Hiện cột (Cái Mép):", all_cols_cm, default=default_cols_cm, key="ms_cm")
             st.dataframe(style_tab_table(f_cm[sel_cm].style, sel_cm, is_cl=False), use_container_width=True, hide_index=True, height=600)
 
