@@ -17,7 +17,7 @@ except:
     flag_html = "🇻🇳 " 
 
 st.set_page_config(page_title="Dự án Window Thủy Triều V2.35", layout="wide")
-st.title("🌊 Phân Tích Thủy Triều (Bản V2.35 - POB Trái/Phải Cái Mép)")
+st.title("🌊 Phân Tích Thủy Triều (Bản V2.35)")
 
 tz_vn = timezone(timedelta(hours=7))
 now_vn = datetime.now(tz_vn)
